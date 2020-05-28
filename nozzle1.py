@@ -1,8 +1,14 @@
 import numpy as np
 import cv2
 import math
-import imutils
 from matplotlib import pyplot as plt
+import config as cfg
+
+# OBS: ao selecionar a região da cor do elemento a ser detectado, fazer a média da cor do objeto.
+# com esta média, rastrear por esta cor.
+# hue (matiz), saturation (saturação) e value (valor) = (HSV = [0-360 =qual cor],[0-100 = saturaçao] ,[0-100=brilho])
+
+# encontrar a porcentagem de cada cor, utilizando a saturação do HSV
 
 def plotaComGraph (v1, threshIm):
     titles = ['Original','Thresh']
@@ -13,135 +19,185 @@ def plotaComGraph (v1, threshIm):
         plt.xticks([]),plt.yticks([])
     plt.show()
 
-cap = cv2.imread('/Users/hz/Documents/nozzlePy/tubos2.png')
-high, width, channels = cap.shape
+def bgrDivisor(img):
+    b,g,r = cv2.split(img)
 
-print("Altura:",high)
-print("Largura:",width)
-# desenho p1 (0,0) p2(raio+i,
+    cv2.imshow("blue",b)
+    cv2.imshow("green",g)
+    cv2.imshow("red",r)
 
-frame = cap
-hsv = cv2.cvtColor(cap, cv2.COLOR_BGR2HSV)
-h, s, v1 = cv2.split(hsv)
+def rgbDivisor(image):
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    bgrImage = cv2.split(image)
 
-blur = cv2.medianBlur(v1,7)
-cv2.imshow('Blur', blur)
+    b = bgrImage[2].reshape(image.shape[0],image.shape[1])
+    g = bgrImage[1].reshape(image.shape[0],image.shape[1])
+    r = bgrImage[0].reshape(image.shape[0],image.shape[1])
+    fig, ax = plt.subplots(3)
+    ax[0].imshow(r, cmap="Reds")  
+    ax[1].imshow(g, cmap="Greens")
+    ax[2].imshow(b, cmap="Blues")
+    plt.show()
 
-lower_black = np.array([0])
-upper_black = np.array([35])
-mask = cv2.inRange(blur, lower_black, upper_black)
-ret2, threshIm = cv2.threshold(mask, 34, 255,cv2.THRESH_BINARY)
+def calcAverageColorToDetect(image):
 
-kernelO = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
-opening = cv2.morphologyEx(threshIm, cv2.MORPH_OPEN, kernelO)
-#cv2.imshow('Opening', opening)
+    np.array(image)
+    colorAverage = []
+    r, g, b, count = 0, 0, 0, 0
+    for line in image:
+        for pixel in line:
+            r += pixel[0]
+            g += pixel[1]
+            b += pixel[2]
+            count +=1
+    print(int(round(r/count)), int(round(g/count)),int(round (b/count)))
+    
+def calibrateGraphcapture(image):
+    r = cv2.selectROI(image)
+    imCrop = image[int(r[1]):int(r[1]+r[3]), int(r[0]):int(r[0]+r[2])]
+    cv2.imshow("ROI",imCrop)
+    
+    return imCrop
 
-kernelE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(2,2))
-erosion = cv2.erode(opening,kernelE,iterations = 3)
-#cv2.imshow('Erosion', erosion)
+def hsvDivisor(imgage):
+    hsv = cv2.cvtColor(imgage, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    return h, s, v, hsv
 
-kernelC = cv2.getStructuringElement(cv2.MORPH_CROSS,(2,2))
-dilationC = cv2.dilate(opening,kernelO,iterations = 2)
-#cv2.imshow('DilatadaC', dilationC)
+def autoCanny(image, sigma=0.33):
+	# compute the median of the single channel pixel intensities
+	v = np.median(image)
+	# apply automatic Canny edge detection using the computed median
+	lower = int(max(0, (1.0 - sigma) * v))
+	upper = int(min(255, (1.0 + sigma) * v))
+	edged = cv2.Canny(image, lower, upper)
+	# return the edged image
+	return edged
 
-kernelO = cv2.getStructuringElement(cv2.MORPH_RECT,(2,2))
-dilation = cv2.dilate(opening,kernelO,iterations = 4)
-cv2.imshow('Dilatada', dilation)
+def findLinesOnImage(imageGray):
+    img = imageGray
+    gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize = 3)
+    
+    minLineLength = 100
+    maxLineGap = 10
+    lines = cv2.HoughLinesP(edges,1,np.pi/180,100,minLineLength,maxLineGap)
+    for x1,y1,x2,y2 in lines[0]:
+        cv2.line(img, (x1, y1), (x2, y2), cfg.PURE_RED, 2)
+    return img, edges
+    
+def calculateAreaAndContours(contours):
+    contoursList = []
+    areaList = []
+    for contour in contours:
+        approx = cv2.approxPolyDP(contour, 0.009 * cv2.arcLength(contour, True), True)
+        area = cv2.contourArea(contour)
+        #print("contorno: ",contour)
+        if ((len(approx) > 1) & (area > 1)):
+            contoursList.append(contour)
+            areaList.append(area)
+    return contoursList, areaList
+def findCenterCordinates(contoursList):
+    centerCordinates = []
+    for contour in range (len(contoursList)):
+        M = cv2.moments(contoursList[contour])
+        cX = int(M["m10"] / M["m00"])
+        cY = int(M["m01"] / M["m00"])
+        centerCordinates.append([cX, cY])
+    return centerCordinates
 
-contornos = dilation
-bilateral_filtered_image = cv2.bilateralFilter(contornos, 5, 175, 175)
-edge_detected_image = cv2.Canny(bilateral_filtered_image, 75, 200)
-contours, a1 = cv2.findContours(edge_detected_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-#contours - é um vetor com os contornos
-#o contorno é um vetor com os pontos
-contour_list = []
-area_list = []
-
-
-for contour in contours:
-    approx = cv2.approxPolyDP(contour,0.009*cv2.arcLength(contour,True),True)
-    area = cv2.contourArea(contour)
-    #print("contorno: ",contour)
-    if ((len(approx) > 8) & (area > 30)):
-        area_list.append(area)
-        contour_list.append(contour)
-
-# varrer os contornos selecionados buscando a menor e a maior area de contorno.
-print ("Area tamanho:",len(area_list))
-print ("Contornos tamanho:",len(contour_list))
-
-#print(contours)
-cXAnt = 0
-cYAnt = 0
-ptosVetor = []
-for contorno in range (len(contour_list)):
-    M = cv2.moments(contour_list[contorno])
-    cX = int(M["m10"] / M["m00"])
-    cXAnt = cX
-    cY = int(M["m01"] / M["m00"])
-    cYAnt = cY
-    ptosVetor.append([cX, cY])
-
-#print(contorno,"-:","cX:", cX, "cY:", cY)
-print ("Ptos-SO",ptosVetor)
-ptosVetor.sort()
-print ("Ptos",ptosVetor)
-
-for pto in range (len(ptosVetor)):
-    cv2.circle(frame, (ptosVetor[pto][0], ptosVetor[pto][1]), 7, (255, 0, 0), -1)
-    per = ((high - ptosVetor[pto][1]) / high)
-    if(pto%2 == 0):
-        print ("Tubo-",pto," ", math.fabs(per)*100,"%")
-
-
-#varrer os contornos
-#pegar o pto mais distante e o mais próximo da origem
-
-
-
-# media das areas para cortar em setores a figura
-#setor = math.sqrt(maiorArea/math.pi)
-#enaquato houver foto ele vai dividir pelo tamanho do setor.
-
-
-cv2.drawContours(frame, contour_list, -1, (0,255,0), 1)
-cv2.imshow("comContornos", frame)
-
-
-
-
-
-
-#Criar um ponto auxiliar que recebe o maior e o menor do contorno e setar na lista para ser desenhada as linhas
-#cv2.line(frame,(menorP[0],menorP[1]),(maiorP[0],maiorP[1]),(255,0,0),1)
-
-#print (distAB)
+def percentMeasureLevel(image, centerCordinates, startMeasure=0, endMeasure=0):
+    startMeasure = 0
+    endMeasure = image.shape[0]
+    high = image.shape[0]
+    ptosVetor = centerCordinates
+    for pto in range (len(ptosVetor)):
+        #cv2.circle(image, (ptosVetor[pto][0], ptosVetor[pto][1]), cfg.DRAW_LINES_THICKNES, (255, 0, 0), -1) # PRINT A CIRCLE on cordinates
+        per = ((high - ptosVetor[pto][1]) / high)
+        if(pto%2 == 0):
+            print ("Tubo -",pto," ", math.fabs(per)*100, "%")
 
 
+def kernelProcess(image, sigma=100):
+    #capLines, edges = findLinesOnImage(image)
+    #cv2.imshow("capLines", capLines)
+    #cv2.imshow("edge", edges)
+    #convolutionMatrix = np.array([[1,0,-1],
+    #                               [1,0,-1],
+    #                               [1,0,-1]]) # Cria Matriz de Convolução para Filtro 2D
 
-#print("Menor: ",menorP)
-#print("Maior: ",maiorP)
-#cv2.line(frame, menorP,  -1, (255,0,0), 1)
-#cv2.line(frame, maiorD,  -1, (0,0,255), 1)
+    # convolutionMatrix = np.array([[-1, -1, -1],
+    #                                [-1, 8, -1],
+    #                                [-1, -1, -1]])
+    
+    #filtred2d = cv2.filter2D(image, -1, convolutionMatrix)
+    #cv2.imshow("f", filtred2d)
+    
+    h, s, v, hsv = hsvDivisor(image)
+
+    # cv2.imshow("h", h)
+    # cv2.imshow("s", s)
+    # cv2.imshow("v", v)
+    # cv2.imshow("HSV", hsv)
+    
+    imageCopy = image.copy()  # Copia um frame em outra array
+    blur = (3,3)
+    # aplica o blur
+    imageBlur = cv2.blur(imageCopy, blur)
+    # converte a imagem em cinza
+    grayBluredImage = cv2.cvtColor(imageBlur, cv2.COLOR_BGR2GRAY)
+    #cv2.imshow('gray-blur', grayBluredImage)
+
+    # dilata a imagem das bordas
+    kernelDilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
+    openingImage = cv2.dilate(grayBluredImage, kernelDilate, iterations = 3)
+    #cv2.imshow('Opening', openingImage)
+
+    # detecta bordas
+    kernelSize = 3
+    openDetectedEdges = cv2.Canny(openingImage, 0, 50, kernelSize)
+    #cv2.imshow('edges-Open', openDetectedEdges)
 
 
+    # comprime a imagem das bordas
+    kernelErosion = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    erodeImage = cv2.erode(grayBluredImage, kernelErosion, iterations = 3)
+    cv2.imshow('Erosion', erodeImage)
 
+    # detecta bordas
+    kernelSize = cfg.KERNEL_SIZE_CANNY
+    closingDetectedEdges = cv2.Canny(erodeImage, cfg.CANNY_DOWN_THRESHOLD, cfg.CANNY_UPPER_THRESHOLD, kernelSize)
+    cv2.imshow('edges-Open', closingDetectedEdges)
 
+    contours, a1 = cv2.findContours(closingDetectedEdges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)    
+    contoursList, areaList = calculateAreaAndContours(contours)
+    cv2.drawContours(image, contours, -1, cfg.PURE_GREEN, cfg.DRAW_LINES_THICKNES)         
+    centerCordinates = findCenterCordinates(contoursList)
 
+    percentMeasureLevel(image, centerCordinates)
 
-#for area in area_list:
-#print(math.sqrt(float(area))*3.14)
-#cv2.imshow('Objects Detected', frame)
+    cv2.imshow("image", image)
+    
+    
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
-#for tubo in range(61):
-#cv2.rectangle(frame,(0,0),(int(x)*int(tubo), h),(0,255,0),1)
-#cv2.imshow('Objects Detected', frame)
+def printFrameInfo(cap):
+    high, width, channels = cap.shape
+    print("Altura:",high)
+    print("Largura:",width)
+    print("Cannels:", channels)
 
-
-#cv2.imshow('gray!', v1)
-#cv2.imshow('Thrash!', threshIm)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+def nuzzleMeasure():
+    cap = cv2.imread('/Users/hz/Documents/nuzzleGraph/fotos/tubos.jpg')    
+    if cap is None:
+        exit()
+    cv2.imshow("ORIGINAL", cap)
+    kernelProcess(cap)
+    
+if __name__ == "__main__":
+    nuzzleMeasure()
 
 
 

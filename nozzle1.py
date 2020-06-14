@@ -98,6 +98,7 @@ def calculateAreaAndContours(contours):
             contoursList.append(contour)
             areaList.append(area)
     return contoursList, areaList
+
 def findCenterCordinates(contoursList):
     centerCordinates = []
     for contour in range (len(contoursList)):
@@ -120,37 +121,19 @@ def percentMeasureLevel(image, centerCordinates, startMeasure=0, endMeasure=0):
 
 
 def kernelProcess(image, sigma=100):
-    #capLines, edges = findLinesOnImage(image)
-    #cv2.imshow("capLines", capLines)
-    #cv2.imshow("edge", edges)
-    #convolutionMatrix = np.array([[1,0,-1],
-    #                               [1,0,-1],
-    #                               [1,0,-1]]) # Cria Matriz de Convolução para Filtro 2D
-
-    # convolutionMatrix = np.array([[-1, -1, -1],
-    #                                [-1, 8, -1],
-    #                                [-1, -1, -1]])
-    
-    #filtred2d = cv2.filter2D(image, -1, convolutionMatrix)
-    #cv2.imshow("f", filtred2d)
-    
-    h, s, v, hsv = hsvDivisor(image)
-
-    # cv2.imshow("h", h)
-    # cv2.imshow("s", s)
-    # cv2.imshow("v", v)
-    # cv2.imshow("HSV", hsv)
     
     imageCopy = image.copy()  # Copia um frame em outra array
     blur = (3,3)
+    
     # aplica o blur
     imageBlur = cv2.blur(imageCopy, blur)
+    
     # converte a imagem em cinza
     grayBluredImage = cv2.cvtColor(imageBlur, cv2.COLOR_BGR2GRAY)
     #cv2.imshow('gray-blur', grayBluredImage)
 
     # dilata a imagem das bordas
-    kernelDilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
+    kernelDilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
     openingImage = cv2.dilate(grayBluredImage, kernelDilate, iterations = 3)
     #cv2.imshow('Opening', openingImage)
 
@@ -158,7 +141,6 @@ def kernelProcess(image, sigma=100):
     kernelSize = 3
     openDetectedEdges = cv2.Canny(openingImage, 0, 50, kernelSize)
     #cv2.imshow('edges-Open', openDetectedEdges)
-
 
     # comprime a imagem das bordas
     kernelErosion = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
@@ -178,7 +160,6 @@ def kernelProcess(image, sigma=100):
     percentMeasureLevel(image, centerCordinates)
 
     cv2.imshow("image", image)
-    
     
     cv2.waitKey(0)
     cv2.destroyAllWindows()

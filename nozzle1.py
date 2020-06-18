@@ -3,13 +3,13 @@ import cv2
 import math
 from matplotlib import pyplot as plt
 import config as cfg
-
+import imutils
 # OBS: ao selecionar a região da cor do elemento a ser detectado, fazer a média da cor do objeto.
 # com esta média, rastrear por esta cor.
 # hue (matiz), saturation (saturação) e value (valor) = (HSV = [0-360 =qual cor],[0-100 = saturaçao] ,[0-100=brilho])
 # encontrar a porcentagem de cada cor, utilizando a saturação do HSV
 
-def plotaComGraph (v1, threshIm):
+def plotaComGraph(v1, threshIm):
     titles = ['Original','Thresh']
     images = [v1, threshIm]
     for i in range(len(images)):
@@ -98,8 +98,10 @@ def findLinesOnImage(image, edges):
         linesToMeasure[int(line[0][0])] = line
         indexes.append(int(line[0][0]))
     
+    indexes.sort()
     lineIndexTop = min(indexes, key=lambda x:abs(x- int(height/2)))
     lineIndexBottom = max(indexes, key=lambda x:abs(x- int(height/2)))
+
     __printLine(image, linesToMeasure[lineIndexTop])
     __printLine(image, linesToMeasure[lineIndexBottom])
     
@@ -111,10 +113,10 @@ def validateAreaAndContours(contours, lineIndexTop, lineIndexBottom):
     for contour in contours:
         approx = cv2.approxPolyDP(contour, 0.009 * cv2.arcLength(contour, True), True)
         area = cv2.contourArea(contour)
-        #print("contorno: ",contour)
         if (contour[0][0][1] > lineIndexTop 
                 and contour[0][0][1] < lineIndexBottom
-                and ((len(approx) > 1) & (area > cfg.AREA_BALLS_SENSIBILITY))):
+                and ((len(approx) >= cfg.AREA_POLY_APROX) 
+                and (area > cfg.AREA_BALLS_SENSIBILITY))):
             contoursList.append(contour)
             areaList.append(area)
     return contoursList, areaList
@@ -127,26 +129,58 @@ def findCenterCordinates(contoursList):
         cY = int(M["m01"] / M["m00"])
         centerCordinates.append([cX, cY])
     return centerCordinates
-
+ 
 def reproduceCleanScenary(image, centerCordinates, startMeasure=0, endMeasure=0):
-    height, width, depth = image.shape
+    height, width, _ = image.shape
     ptosVetor = centerCordinates
 
     circlesImage = np.zeros((height, width), np.uint8)
 
     for pto in range (len(ptosVetor)):
-        cv2.circle(circlesImage, (ptosVetor[pto][0], ptosVetor[pto][1]), 4, (255, 255, 255), -1) # PRINT A CIRCLE on cordinates
+        #cv2.circle(circlesImage, (ptosVetor[pto][0], ptosVetor[pto][1]), 4, (255, 255, 255), -1) # PRINT A CIRCLE on cordinates
+        cv2.rectangle(circlesImage, (ptosVetor[pto][0], ptosVetor[pto][1]), (ptosVetor[pto][0]+5, ptosVetor[pto][1]+5), cfg.PURE_WHITE, -1)
         
     return circlesImage
 
 def calculatePercentMeasureLevel(image, centerCordinates):
-    height, width, _ = image.shape
+    if len(image.shape) >= 3:
+        width, height, depth = image.shape
+    else: height = image.shape[1]
     for pointCenter in range (len(centerCordinates)):
         percent = ((centerCordinates[pointCenter][1] - height ) / height)
-        print ("Tubo -",pointCenter," ", math.fabs(percent)*100, "%")
-        perAnt = percent
-        xArrayPrevious = centerCordinates[pointCenter][0]
+        total = round(math.fabs(percent)*100, 2)
+        print ("Tubo -",pointCenter," ", total, "%")
+
+        #perAnt = percent
+        #xArrayPrevious = centerCordinates[pointCenter][0]
     
+def sort_contours(cnts, method="left-to-right"):
+
+    reverse = False
+    i = 0
+
+    if method == "right-to-left" or method == "bottom-to-top":
+        reverse = True
+
+    if method == "top-to-bottom" or method == "bottom-to-top":
+        i = 1
+
+    boundingBoxes = [cv2.boundingRect(c) for c in cnts]
+    (cnts, boundingBoxes) = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b:b[1][i], reverse=reverse))
+
+    return cnts, boundingBoxes
+
+def findCenters(image, c, i):
+    M = cv2.moments(c)
+    cX = int(M["m10"] / M["m00"])
+    cY = int(M["m01"] / M["m00"])
+    
+    return cX, cY
+
+def drawIdBalls(image, cX, cY, i):
+    cv2.putText(image, "{}%".format(i + 1), (cX - 20, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.4, cfg.PURE_RED, cfg.DRAW_LINES_THICKNES)
+    return image
+
 def kernelProcess(image, sigma=100):
     
     imageCopy = image.copy()  # Copia um frame em outra array
@@ -178,23 +212,47 @@ def kernelProcess(image, sigma=100):
     
     lineIndexTop, lineIndexBottom = findLinesOnImage(image, closingDetectedEdges)
 
-    contours, _ = cv2.findContours(closingDetectedEdges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)    
+    contours, _ = cv2.findContours(closingDetectedEdges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)    
     contoursList, _ = validateAreaAndContours(contours, lineIndexTop, lineIndexBottom)
     
     centerCordinates = findCenterCordinates(contoursList)
-    cv2.drawContours(image, contoursList, -1, cfg.PURE_GREEN, cfg.DRAW_LINES_THICKNES)         
-    
-    
+    #cv2.drawContours(image, contoursList, -1, cfg.PURE_GREEN, cfg.DRAW_LINES_THICKNES)         
+    #centerCordinates = findCenterCordinates(centerCordinates)
+    #calculatePercentMeasureLevel(image, centerCordinates)
+
     circleImage = reproduceCleanScenary(image, centerCordinates, startMeasure=lineIndexBottom, endMeasure=lineIndexBottom)
     newCleanedImage = circleImage[lineIndexTop:lineIndexBottom]
+    
     #############
-    contours, _ = cv2.findContours(newCleanedImage, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)    
-    contoursList, _ = validateAreaAndContours(contours, lineIndexTop, lineIndexBottom)
-    centerCordinates = findCenterCordinates(contoursList)
-    calculatePercentMeasureLevel(image, centerCordinates)
-    #############
+    
+    contours, _ = cv2.findContours(newCleanedImage, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    cv2.imshow("circulos", circleImage)
+    #cnts = sort_contours(contours)
+    #cnts = imutils.grab_contours(cnts)
+    #cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+    cnts, _ = sort_contours(contours, method="left-to-right")
+    
+    for (i, c) in enumerate(cnts):
+        cX, cY = findCenters(newCleanedImage, c, i)
+        
+        height = newCleanedImage.shape[1]
+        percent = ((height-cY)/ height)
+        total = round(math.fabs(percent)*100, 2)
+        orig = drawIdBalls(image, cX, cY, total)
+        print ("Tubo -", i," ", total, "%")
+    #calculatePercentMeasureLevel(image, centerCordinates)
+    
+    
+    cv2.imshow("Unsorted", orig)
+    
+    
+    
+    
+    #############
+    
+    
+    
+    
     cv2.imshow("image", image)
     
     cv2.waitKey(0)
@@ -207,8 +265,9 @@ def printFrameInfo(cap):
     print("Cannels:", channels)
 
 def nuzzleMeasure():
-    cap = cv2.imread('/Users/hz/Documents/nuzzleGraph/fotos/tubos.jpg')    
+    cap = cv2.imread('/Users/hz/Documents/nuzzleGraph/fotos/tubos.jpg')
     if cap is None:
+        print("Imagem não carregada!")
         exit()
     cv2.imshow("ORIGINAL", cap)
     kernelProcess(cap)
